@@ -1,0 +1,134 @@
+{
+  "pluginAlias": "VornadoOSCR37HomebridgePlugin",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "required": true,
+        "default": "Vornado OSCR37 Alexa Homebridge Platform"
+      },
+      "devices": {
+        "type": "array",
+        "required": true,
+        "items": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "description": "Name to display in the Homebridge UI for this device",
+              "required": true,
+              "default": "Vornado OSCR37"
+            },
+            "controlId": {
+              "type": "string",
+              "description": "ID for updating state of the fan",
+              "required": true
+            },
+            "queryId": {
+              "type": "string",
+              "description": "ID for querying state of the fan",
+              "required": true
+            }
+          }
+        }
+      },
+      "amazonPage": {
+        "title": "Amazon Page",
+        "type": "string",
+        "description": "Home page for amazon in user's country",
+        "default": "amazon.com",
+        "required": true
+      },
+      "amazonProxyLang": {
+        "title": "Amazon Proxy Language",
+        "type": "string",
+        "description": "Language that the Amazon login proxy will be in",
+        "default": "en_US"
+      },
+      "alexaServiceHost": {
+        "title": "Alexa Service Host",
+        "type": "string",
+        "description": "The host API to use for alexa services",
+        "default": "pitangui.amazon.com",
+        "required": true
+      },
+      "cookie": {
+        "title": "Amazon Cookie",
+        "type": "object",
+        "properties": {
+          "loginCookie": {
+            "title": "Login Cookie",
+            "type": "string",
+            "required": true
+          },
+          "frc": {
+            "title": "FRC String",
+            "type": "string",
+            "required": true
+          },
+          "map-md": {
+            "title": "Map MD",
+            "type": "string",
+            "required": true
+          },
+          "deviceId": {
+            "title": "Device ID",
+            "type": "string",
+            "required": true
+          },
+          "deviceSerial": {
+            "title": "Device Serial",
+            "type": "string",
+            "required": true
+          },
+          "refreshToken": {
+            "title": "Refresh Token",
+            "type": "string",
+            "required": true
+          },
+          "tokenDate": {
+            "title": "Token Issue Date (Epoch)",
+            "type": "number",
+            "required": true
+          },
+          "macDms": {
+            "title": "Device Keys",
+            "type": "object",
+            "required": true,
+            "properties": {
+              "device_private_key": {
+                "title": "Device Private Key",
+                "type": "string",
+                "required": true
+              },
+              "adp_token": {
+                "title": "ADP Token",
+                "type": "string",
+                "required": true
+              }
+            }
+          },
+          "amazonPage": {
+            "title": "Amazon Page",
+            "type": "string",
+            "required": true
+          },
+          "localCookie": {
+            "title": "Local Cookie",
+            "type": "string",
+            "required": true
+          },
+          "csrf": {
+            "title": "CSRF Token",
+            "type": "string",
+            "required": true
+          }
+        }
+      }
+    }
+  }
+}
