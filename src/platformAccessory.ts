@@ -42,9 +42,9 @@ export class OSCR37HomebridgePlatformAccessory {
     // see https://developers.homebridge.io/#/service/Fanv2
 
     // register handlers for the On/Off Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this))                // SET - bind to the `setOn` method below
-      .onGet(this.getOn.bind(this));               // GET - bind to the `getOn` method below
+    this.service.getCharacteristic(this.platform.Characteristic.Active)
+      .onSet(this.setActive.bind(this))                // SET - bind to the `setOn` method below
+      .onGet(this.getActive.bind(this));               // GET - bind to the `getOn` method below
 
     this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onSet(this.setIntensity.bind(this))
@@ -67,10 +67,10 @@ export class OSCR37HomebridgePlatformAccessory {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, turning on a Fan.
    */
-  async setOn(value: CharacteristicValue) {
-    // implement your own code to turn your device on/off
+  async setActive(value: CharacteristicValue) {
+    const isOn = value === this.platform.Characteristic.Active.ACTIVE;
     await firstValueFrom(this.platform.alexaClient.sendDeviceAction(
-      this.controlId, new FanPowerToggleCommand(value as boolean)));
+      this.controlId, new FanPowerToggleCommand(isOn)));
     this.platform.log.debug('Set Characteristic On ->', value);
   }
 
@@ -87,7 +87,7 @@ export class OSCR37HomebridgePlatformAccessory {
    * @example
    * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
    */
-  async getOn(): Promise<CharacteristicValue> {
+  async getActive(): Promise<CharacteristicValue> {
     // implement your own code to check if the device is on
     const status =
       await firstValueFrom(this.platform.alexaClient.getDeviceStatus(this.queryId));
@@ -100,7 +100,9 @@ export class OSCR37HomebridgePlatformAccessory {
       // Couldn't get a status
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    return isOn as CharacteristicValue;
+    return isOn ?
+      this.platform.Characteristic.Active.ACTIVE :
+      this.platform.Characteristic.Active.INACTIVE;
   }
 
   /**
@@ -110,7 +112,7 @@ export class OSCR37HomebridgePlatformAccessory {
   async setIntensity(value: CharacteristicValue) {
     const percentage = value as number;
     if (percentage === 0) {
-      return this.setOn(false);
+      return this.setActive(false);
     }
     const intensity = percentage <= 25 ? '0' : percentage <= 50 ? '1' : percentage <= 75 ? '2' : '3';
     await firstValueFrom(this.platform.alexaClient.sendDeviceAction(
@@ -170,8 +172,10 @@ export class OSCR37HomebridgePlatformAccessory {
   private updateCharacteristics(fanStatus: FanStatus) {
     if (fanStatus.isOn != null) {
       this.service.updateCharacteristic(
-        this.platform.Characteristic.On,
-        fanStatus.isOn);
+        this.platform.Characteristic.Active,
+        fanStatus.isOn ?
+          this.platform.Characteristic.Active.ACTIVE :
+          this.platform.Characteristic.Active.INACTIVE);
     }
     if (fanStatus.fanIntensity != null) {
       this.service.updateCharacteristic(
