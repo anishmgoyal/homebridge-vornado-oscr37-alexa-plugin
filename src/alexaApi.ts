@@ -72,7 +72,7 @@ export class FanOscillationToggleCommand {
 export interface FanStatus {
     connected?: boolean;
     isOn?: boolean;
-    fanIntensity?: '0' | '1' | '2' | '3' | '4';
+    fanIntensity?: '0' | '1' | '2' | '3';
     isOscillating?: boolean;
     shutdownTimer?: '0' | '1' | '2' | '3' | '4';
 }
