@@ -24,6 +24,9 @@ export interface OSCR37HomebridgePlatformConfig extends PlatformConfig {
     amazonProxyLang: string;
     alexaServiceHost: string;
 
+    enablePolling?: boolean;
+    pollInterval: number; // In seconds
+
     // We don't control the data encapsulated in this type, so we won't
     // bother enumerating it; this code shouldn't explicitly touch the
     // data in it.

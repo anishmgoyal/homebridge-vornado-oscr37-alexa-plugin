@@ -1,6 +1,6 @@
-import { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
+import { Service, PlatformAccessory, CharacteristicValue, Characteristic } from 'homebridge';
 import { firstValueFrom } from 'rxjs';
-import { FanPowerToggleCommand, FanIntensityChangeCommand, FanOscillationToggleCommand } from './alexaApi';
+import { FanPowerToggleCommand, FanIntensityChangeCommand, FanOscillationToggleCommand, FanStatus } from './alexaApi';
 
 import { OSCR37HomebridgePlatform } from './platform';
 
@@ -54,45 +54,13 @@ export class OSCR37HomebridgePlatformAccessory {
       .onSet(this.setSwingMode.bind(this))
       .onGet(this.getSwingMode.bind(this));
 
-    /**
-     * Creating multiple services of the same type.
-     *
-     * To avoid "Cannot add a Service with the same UUID another Service without also defining a unique 'subtype' property." error,
-     * when creating multiple services of the same type, you need to use the following syntax to specify a name and subtype id:
-     * this.accessory.getService('NAME') || this.accessory.addService(this.platform.Service.Lightbulb, 'NAME', 'USER_DEFINED_SUBTYPE_ID');
-     *
-     * The USER_DEFINED_SUBTYPE must be unique to the platform accessory (if you platform exposes multiple accessories, each accessory
-     * can use the same sub type id.)
-     */
-
-    // Example: add two "motion sensor" services to the accessory
-    // const motionSensorOneService = this.accessory.getService('Motion Sensor One Name') ||
-    //   this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor One Name', 'YourUniqueIdentifier-1');
-
-    // const motionSensorTwoService = this.accessory.getService('Motion Sensor Two Name') ||
-    //   this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor Two Name', 'YourUniqueIdentifier-2');
-
-    /**
-     * Updating characteristics values asynchronously.
-     *
-     * Example showing how to update the state of a Characteristic asynchronously instead
-     * of using the `on('get')` handlers.
-     * Here we change update the motion sensor trigger states on and off every 10 seconds
-     * the `updateCharacteristic` method.
-     *
-     */
-    // let motionDetected = false;
-    // setInterval(() => {
-    //   // EXAMPLE - inverse the trigger
-    //   motionDetected = !motionDetected;
-
-    //   // push the new value to HomeKit
-    //   motionSensorOneService.updateCharacteristic(this.platform.Characteristic.MotionDetected, motionDetected);
-    //   motionSensorTwoService.updateCharacteristic(this.platform.Characteristic.MotionDetected, !motionDetected);
-
-    //   this.platform.log.debug('Triggering motionSensorOneService:', motionDetected);
-    //   this.platform.log.debug('Triggering motionSensorTwoService:', !motionDetected);
-    // }, 10000);
+    if (this.platform.config.enablePolling) {
+      setInterval(async () => {
+        const status = await firstValueFrom(
+          this.platform.alexaClient.getDeviceStatus(this.queryId));
+        this.updateCharacteristics(status);
+      }, this.platform.config.pollInterval * 1000 /* seconds to milliseconds */);
+    }
   }
 
   /**
@@ -123,6 +91,8 @@ export class OSCR37HomebridgePlatformAccessory {
     // implement your own code to check if the device is on
     const status =
       await firstValueFrom(this.platform.alexaClient.getDeviceStatus(this.queryId));
+    this.updateCharacteristics(status); // Waste no data
+
     const {isOn} = status;
     this.platform.log.debug('Get Characteristic On ->', isOn);
 
@@ -151,6 +121,8 @@ export class OSCR37HomebridgePlatformAccessory {
   async getIntensity(): Promise<CharacteristicValue> {
     const status =
       await firstValueFrom(this.platform.alexaClient.getDeviceStatus(this.queryId));
+    this.updateCharacteristics(status); // Waste no data
+
     const {isOn, fanIntensity} = status;
     this.platform.log.debug('Get Characteristic Intensity ->', fanIntensity);
 
@@ -162,7 +134,7 @@ export class OSCR37HomebridgePlatformAccessory {
       // Couldn't get a status
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    return fanIntensity === '0' ? 25 : fanIntensity === '1' ? 50 : fanIntensity === '2' ? 75 : 100;
+    return this.fanIntensityToPercentage(fanIntensity);
   }
 
   /**
@@ -179,6 +151,8 @@ export class OSCR37HomebridgePlatformAccessory {
   async getSwingMode(): Promise<CharacteristicValue> {
     const status =
       await firstValueFrom(this.platform.alexaClient.getDeviceStatus(this.queryId));
+    this.updateCharacteristics(status); // Waste no data
+
     const {isOscillating} = status;
     this.platform.log.debug('Get Characteristic Oscillation On ->', isOscillating);
 
@@ -189,6 +163,43 @@ export class OSCR37HomebridgePlatformAccessory {
     return isOscillating ?
       this.platform.Characteristic.SwingMode.SWING_ENABLED :
       this.platform.Characteristic.SwingMode.SWING_DISABLED;
+  }
+
+
+  // Any time we check state for any characteristic of the fan, update all characteristics
+  private updateCharacteristics(fanStatus: FanStatus) {
+    if (fanStatus.isOn != null) {
+      this.service.updateCharacteristic(
+        this.platform.Characteristic.On,
+        fanStatus.isOn);
+    }
+    if (fanStatus.fanIntensity != null) {
+      this.service.updateCharacteristic(
+        this.platform.Characteristic.RotationSpeed,
+        this.fanIntensityToPercentage(fanStatus.fanIntensity));
+    }
+    if (fanStatus.isOscillating != null) {
+      this.service.updateCharacteristic(
+        this.platform.Characteristic.SwingMode,
+        fanStatus.isOscillating ?
+          this.platform.Characteristic.SwingMode.SWING_ENABLED :
+          this.platform.Characteristic.SwingMode.SWING_DISABLED);
+    }
+  }
+
+  private fanIntensityToPercentage(intensity: string) {
+    switch (intensity) {
+      case '0':
+        return 25;
+      case '1':
+        return 50;
+      case '2':
+        return 75;
+      case '3':
+        return 100;
+      default:
+        throw new Error(`Unexpected intensity ${intensity} not supported`);
+    }
   }
 
 }

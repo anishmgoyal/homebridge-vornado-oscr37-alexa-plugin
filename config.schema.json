@@ -36,6 +36,19 @@
           }
         }
       },
+      "enablePolling": {
+        "title": "Enable Polling",
+        "type": "boolean",
+        "description": "Whether or not to poll for fan states periodically",
+        "default": false
+      },
+      "pollInterval": {
+        "title": "Poll Interval (Seconds)",
+        "type": "integer",
+        "description": "How often to poll for fan states, in seconds, IF ENABLED",
+        "required": true,
+        "default": 60
+      },
       "amazonPage": {
         "title": "Amazon Page",
         "type": "string",
