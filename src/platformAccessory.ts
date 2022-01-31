@@ -1,5 +1,5 @@
 import { Service, PlatformAccessory, CharacteristicValue, Characteristic } from 'homebridge';
-import { firstValueFrom } from 'rxjs';
+import { debounceTime, firstValueFrom, Subject } from 'rxjs';
 import { FanPowerToggleCommand, FanIntensityChangeCommand, FanOscillationToggleCommand, FanStatus } from './alexaApi';
 
 import { OSCR37HomebridgePlatform } from './platform';
@@ -15,6 +15,14 @@ export class OSCR37HomebridgePlatformAccessory {
   private displayName: string;
   private controlId: string;
   private queryId: string;
+
+  private currentState: FanStatus = {
+    isOn: false,
+    fanIntensity: '0',
+    isOscillating: false,
+  };
+
+  private requestedFanUpdate$: Subject<void> = new Subject();
 
   constructor(
     private readonly platform: OSCR37HomebridgePlatform,
@@ -43,8 +51,8 @@ export class OSCR37HomebridgePlatformAccessory {
 
     // register handlers for the On/Off Characteristic
     this.service.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setActive.bind(this))                // SET - bind to the `setOn` method below
-      .onGet(this.getActive.bind(this));               // GET - bind to the `getOn` method below
+      .onSet(this.setActive.bind(this))                // SET - bind to the `setActive` method below
+      .onGet(this.getActive.bind(this));               // GET - bind to the `getActive` method below
 
     this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onSet(this.setIntensity.bind(this))
@@ -54,11 +62,16 @@ export class OSCR37HomebridgePlatformAccessory {
       .onSet(this.setSwingMode.bind(this))
       .onGet(this.getSwingMode.bind(this));
 
+    // Subscribe indefinitely - we never destroy this
+    this.requestedFanUpdate$.pipe(debounceTime(50)).subscribe(async () => {
+      this.currentState = await firstValueFrom(
+        this.platform.alexaClient.getDeviceStatus(this.queryId));
+      this.updateCharacteristics(this.currentState);
+    });
+
     if (this.platform.config.enablePolling) {
       setInterval(async () => {
-        const status = await firstValueFrom(
-          this.platform.alexaClient.getDeviceStatus(this.queryId));
-        this.updateCharacteristics(status);
+        this.requestedFanUpdate$.next();
       }, this.platform.config.pollInterval * 1000 /* seconds to milliseconds */);
     }
   }
@@ -85,15 +98,13 @@ export class OSCR37HomebridgePlatformAccessory {
    * asynchronously instead using the `updateCharacteristic` method instead.
 
    * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
+   * this.service.updateCharacteristic(this.platform.Characteristic.Active, true)
    */
   async getActive(): Promise<CharacteristicValue> {
-    // implement your own code to check if the device is on
-    const status =
-      await firstValueFrom(this.platform.alexaClient.getDeviceStatus(this.queryId));
-    this.updateCharacteristics(status); // Waste no data
+    // Trigger an update pass
+    this.requestedFanUpdate$.next();
 
-    const {isOn} = status;
+    const {isOn} = this.currentState;
     this.platform.log.debug('Get Characteristic On ->', isOn);
 
     if (isOn == null) {
@@ -121,16 +132,11 @@ export class OSCR37HomebridgePlatformAccessory {
   }
 
   async getIntensity(): Promise<CharacteristicValue> {
-    const status =
-      await firstValueFrom(this.platform.alexaClient.getDeviceStatus(this.queryId));
-    this.updateCharacteristics(status); // Waste no data
+    // Trigger an update pass
+    this.requestedFanUpdate$.next();
 
-    const {isOn, fanIntensity} = status;
+    const {fanIntensity} = this.currentState;
     this.platform.log.debug('Get Characteristic Intensity ->', fanIntensity);
-
-    if (isOn === false) {
-      return 0; // intensity is 0 if we're off
-    }
 
     if (fanIntensity == null) {
       // Couldn't get a status
@@ -151,11 +157,10 @@ export class OSCR37HomebridgePlatformAccessory {
   }
 
   async getSwingMode(): Promise<CharacteristicValue> {
-    const status =
-      await firstValueFrom(this.platform.alexaClient.getDeviceStatus(this.queryId));
-    this.updateCharacteristics(status); // Waste no data
+    // Trigger an update pass
+    this.requestedFanUpdate$.next();
 
-    const {isOscillating} = status;
+    const {isOscillating} = this.currentState;
     this.platform.log.debug('Get Characteristic Oscillation On ->', isOscillating);
 
     if (isOscillating == null) {

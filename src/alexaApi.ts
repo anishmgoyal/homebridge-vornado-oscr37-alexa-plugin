@@ -114,13 +114,13 @@ export class AlexaApi {
             proxyOwnIp: 'localhost',
             proxyPort: 3001,
             proxyLogLevel: 'info',
-            bluetooth: true,
+            bluetooth: false,
             logger: console.log,
             alexaServiceHost: config.alexaServiceHost,
             amazonPage: config.amazonPage,
             baseAmazonPage: config.amazonPage,
             amazonPageProxyLanguage: config.amazonProxyLang,
-            useWsMqtt: true,
+            useWsMqtt: false,
             cookieRefreshInterval: 7 * 24 * 60 * 60 * 1000,
         };
 
