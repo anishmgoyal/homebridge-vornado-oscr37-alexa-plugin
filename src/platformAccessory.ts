@@ -1,5 +1,6 @@
-import { Service, PlatformAccessory, CharacteristicValue, Characteristic } from 'homebridge';
-import { debounceTime, firstValueFrom, Subject } from 'rxjs';
+import { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
+import { firstValueFrom, Subject } from 'rxjs';
+import { shareReplay, switchMap, tap, throttleTime } from 'rxjs/operators';
 import { FanPowerToggleCommand, FanIntensityChangeCommand, FanOscillationToggleCommand, FanStatus } from './alexaApi';
 
 import { OSCR37HomebridgePlatform } from './platform';
@@ -16,13 +17,16 @@ export class OSCR37HomebridgePlatformAccessory {
   private controlId: string;
   private queryId: string;
 
-  private currentState: FanStatus = {
-    isOn: false,
-    fanIntensity: '0',
-    isOscillating: false,
-  };
-
   private requestedFanUpdate$: Subject<void> = new Subject();
+
+  // Let's try our best to group requests to get fan state, if
+  // requests come in at the same time
+  private fanStatus$ = this.requestedFanUpdate$.pipe(
+    throttleTime(100),
+    switchMap(() => this.platform.alexaClient.getDeviceStatus(this.queryId)),
+    tap(status => this.updateCharacteristics(status)),
+    shareReplay({bufferSize: 1, refCount: true}),
+  );
 
   constructor(
     private readonly platform: OSCR37HomebridgePlatform,
@@ -62,23 +66,22 @@ export class OSCR37HomebridgePlatformAccessory {
       .onSet(this.setSwingMode.bind(this))
       .onGet(this.getSwingMode.bind(this));
 
-    // Subscribe indefinitely - we never destroy this
-    this.requestedFanUpdate$.pipe(debounceTime(50)).subscribe(async () => {
-      this.currentState = await firstValueFrom(
-        this.platform.alexaClient.getDeviceStatus(this.queryId));
-      this.updateCharacteristics(this.currentState);
-    });
-
     if (this.platform.config.enablePolling) {
       setInterval(async () => {
+        // Create a subscriber for the fan status observable, to make sure that
+        // the transforms are actually applied; otherwise, nothing will happen
+        const newState = firstValueFrom(this.fanStatus$);
         this.requestedFanUpdate$.next();
+        // We don't need to do anything with the state, because one side effect
+        // of the observable is that we update the states
+        await newState;
       }, this.platform.config.pollInterval * 1000 /* seconds to milliseconds */);
     }
   }
 
   /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, turning on a Fan.
+   * Sets whether or not the fan is active
+   * @value Should be ACTIVE or INACTIVE
    */
   async setActive(value: CharacteristicValue) {
     const isOn = value === this.platform.Characteristic.Active.ACTIVE;
@@ -88,23 +91,15 @@ export class OSCR37HomebridgePlatformAccessory {
   }
 
   /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Fan is on.
-   *
-   * GET requests should return as fast as possbile. A long delay here will result in
-   * HomeKit being unresponsive and a bad user experience in general.
-   *
-   * If your device takes time to respond you should update the status of your device
-   * asynchronously instead using the `updateCharacteristic` method instead.
-
-   * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.Active, true)
+   * Gets whether or not the fan is active, using a shared Observable.
    */
   async getActive(): Promise<CharacteristicValue> {
-    // Trigger an update pass
+    // Trigger an update pass. Subscribe to the observable first, to
+    // ensure that transforms are applied.
+    const newState = firstValueFrom(this.fanStatus$);
     this.requestedFanUpdate$.next();
 
-    const {isOn} = this.currentState;
+    const {isOn} = await newState;
     this.platform.log.debug('Get Characteristic On ->', isOn);
 
     if (isOn == null) {
@@ -117,8 +112,9 @@ export class OSCR37HomebridgePlatformAccessory {
   }
 
   /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, changing the Intensity
+   * Sets the speed of the fan
+   * @value Should be a number from 0 to 100. Fan has four modes, so it'll
+   * choose one of those based on the provided percentage
    */
   async setIntensity(value: CharacteristicValue) {
     const percentage = value as number;
@@ -131,11 +127,17 @@ export class OSCR37HomebridgePlatformAccessory {
     this.platform.log.debug('Set Characteristic Intensity -> ', intensity);
   }
 
+  /**
+   * Gets the current rotation intensity for the fan, translating from the fan's modes to a
+   * percentage. Uses a shared Observable.
+   */
   async getIntensity(): Promise<CharacteristicValue> {
-    // Trigger an update pass
+    // Trigger an update pass. Subscribe to the observable first, to
+    // ensure that transforms are applied.
+    const newState = firstValueFrom(this.fanStatus$);
     this.requestedFanUpdate$.next();
 
-    const {fanIntensity} = this.currentState;
+    const {fanIntensity} = await newState;
     this.platform.log.debug('Get Characteristic Intensity ->', fanIntensity);
 
     if (fanIntensity == null) {
@@ -146,8 +148,8 @@ export class OSCR37HomebridgePlatformAccessory {
   }
 
   /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, changing the Intensity
+   * Sets whether or not the fan is oscillating
+   * @value Should be SWING_ENABLED / SWING_DISABLED
    */
   async setSwingMode(value: CharacteristicValue) {
     const isOscillating = value === this.platform.Characteristic.SwingMode.SWING_ENABLED ? true : false;
@@ -156,11 +158,16 @@ export class OSCR37HomebridgePlatformAccessory {
     this.platform.log.debug('Set Characteristic Oscillation On -> ', isOscillating);
   }
 
+  /**
+   * Checks if the fan is oscillating or not, using a shared Observable.
+   */
   async getSwingMode(): Promise<CharacteristicValue> {
-    // Trigger an update pass
+    // Trigger an update pass. Subscribe to the observable first, to
+    // ensure that transforms are applied.
+    const newState = firstValueFrom(this.fanStatus$);
     this.requestedFanUpdate$.next();
 
-    const {isOscillating} = this.currentState;
+    const {isOscillating} = await newState;
     this.platform.log.debug('Get Characteristic Oscillation On ->', isOscillating);
 
     if (isOscillating == null) {
