@@ -1,7 +1,8 @@
-import { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
+import { Categories, CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import { firstValueFrom, Subject } from 'rxjs';
-import { shareReplay, switchMap, tap, throttleTime } from 'rxjs/operators';
+import { shareReplay, switchMap, throttleTime } from 'rxjs/operators';
 import { FanPowerToggleCommand, FanIntensityChangeCommand, FanOscillationToggleCommand, FanStatus } from './alexaApi';
+import { OSCR37FanService, OSCR37RotationSpeed } from './oscr37ServiceProvider';
 
 import { OSCR37HomebridgePlatform } from './platform';
 
@@ -19,13 +20,16 @@ export class OSCR37HomebridgePlatformAccessory {
 
   private requestedFanUpdate$: Subject<void> = new Subject();
 
+  private readonly CharName = this.platform.Characteristic.Name;
+  private readonly CharActive = this.platform.Characteristic.Active;
+  private readonly CharSwingMode = this.platform.Characteristic.SwingMode;
+
   // Let's try our best to group requests to get fan state, if
   // requests come in at the same time
   private fanStatus$ = this.requestedFanUpdate$.pipe(
-    throttleTime(100),
+    throttleTime(20),
     switchMap(() => this.platform.alexaClient.getDeviceStatus(this.queryId)),
-    tap(status => this.updateCharacteristics(status)),
-    shareReplay({bufferSize: 1, refCount: true}),
+    shareReplay({ bufferSize: 1, refCount: true }),
   );
 
   constructor(
@@ -36,33 +40,26 @@ export class OSCR37HomebridgePlatformAccessory {
     this.controlId = accessory.context.device.controlId;
     this.queryId = accessory.context.device.queryId;
 
+    this.accessory.category = Categories.FAN;
+
     // set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Vornado')
       .setCharacteristic(this.platform.Characteristic.Model, 'OSCR37')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.controlId);
 
-    // get the Fan service if it exists, otherwise create a new Fan service
-    // you can create multiple services for each accessory
-    this.service = this.accessory.getService(this.platform.Service.Fanv2) || this.accessory.addService(this.platform.Service.Fanv2);
+    // Get or set the fan service, and set the fan's name
+    this.service = this.accessory.getService(OSCR37FanService) || this.accessory.addService(OSCR37FanService);
+    this.service.setCharacteristic(this.CharName, this.displayName);
 
-    // set the service name, this is what is displayed as the default name on the Home app
-    // in this example we are using the name we stored in the `accessory.context` in the `discoverDevices` method.
-    this.service.setCharacteristic(this.platform.Characteristic.Name, this.displayName);
-
-    // each service must implement at-minimum the "required characteristics" for the given service type
-    // see https://developers.homebridge.io/#/service/Fanv2
-
-    // register handlers for the On/Off Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setActive.bind(this))                // SET - bind to the `setActive` method below
-      .onGet(this.getActive.bind(this));               // GET - bind to the `getActive` method below
-
-    this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+    // Set fan characteristic methods
+    this.service.getCharacteristic(this.CharActive)
+      .onSet(this.setActive.bind(this))
+      .onGet(this.getActive.bind(this));
+    this.service.getCharacteristic(OSCR37RotationSpeed)
       .onSet(this.setIntensity.bind(this))
       .onGet(this.getIntensity.bind(this));
-
-    this.service.getCharacteristic(this.platform.Characteristic.SwingMode)
+    this.service.getCharacteristic(this.CharSwingMode)
       .onSet(this.setSwingMode.bind(this))
       .onGet(this.getSwingMode.bind(this));
 
@@ -72,26 +69,25 @@ export class OSCR37HomebridgePlatformAccessory {
         // the transforms are actually applied; otherwise, nothing will happen
         const newState = firstValueFrom(this.fanStatus$);
         this.requestedFanUpdate$.next();
-        // We don't need to do anything with the state, because one side effect
-        // of the observable is that we update the states
-        await newState;
+        this.updateCharacteristics(await newState);
       }, this.platform.config.pollInterval * 1000 /* seconds to milliseconds */);
     }
   }
 
   /**
-   * Sets whether or not the fan is active
-   * @value Should be ACTIVE or INACTIVE
+   * Turns the fan on or off
+   * @value ACTIVE to turn the fan on, INACTIVE to turn it off
    */
   async setActive(value: CharacteristicValue) {
-    const isOn = value === this.platform.Characteristic.Active.ACTIVE;
+    const isOn = value === this.CharActive.ACTIVE;
     await firstValueFrom(this.platform.alexaClient.sendDeviceAction(
       this.controlId, new FanPowerToggleCommand(isOn)));
-    this.platform.log.debug('Set Characteristic On ->', value);
+    this.platform.log.debug('Set Characteristic Active -> ', isOn);
   }
 
   /**
-   * Gets whether or not the fan is active, using a shared Observable.
+   * Gets the current power state of the fan
+   * @returns ACTIVE if the fan is on, INACTIVE if it is off
    */
   async getActive(): Promise<CharacteristicValue> {
     // Trigger an update pass. Subscribe to the observable first, to
@@ -99,16 +95,15 @@ export class OSCR37HomebridgePlatformAccessory {
     const newState = firstValueFrom(this.fanStatus$);
     this.requestedFanUpdate$.next();
 
-    const {isOn} = await newState;
-    this.platform.log.debug('Get Characteristic On ->', isOn);
-
+    const { isOn } = await newState;
     if (isOn == null) {
       // Couldn't get a status
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    return isOn ?
-      this.platform.Characteristic.Active.ACTIVE :
-      this.platform.Characteristic.Active.INACTIVE;
+
+    const value = isOn ? this.CharActive.ACTIVE : this.CharActive.INACTIVE;
+    this.platform.log.debug('Get Characteristic Active ->', value);
+    return value;
   }
 
   /**
@@ -117,13 +112,18 @@ export class OSCR37HomebridgePlatformAccessory {
    * choose one of those based on the provided percentage
    */
   async setIntensity(value: CharacteristicValue) {
-    const percentage = value as number;
-    if (percentage === 0) {
-      return this.setActive(false);
+    if (value === 0) {
+      // Homekit will send a separate request to turn the fan off, so just ignore
+      // this request.
+      // It's important that 0 is a valid value, otherwise '25' will act as the
+      // off switch.
+      this.platform.log.debug('Refusing to set intensity to 0');
+      return;
     }
-    const intensity = percentage <= 25 ? '0' : percentage <= 50 ? '1' : percentage <= 75 ? '2' : '3';
+    const intensity = Math.floor((value as number - 1) / 25);
     await firstValueFrom(this.platform.alexaClient.sendDeviceAction(
-      this.controlId, new FanIntensityChangeCommand(intensity)));
+      this.controlId, new FanIntensityChangeCommand(
+        intensity.toFixed(0) as '0' | '1' | '2' | '3')));
     this.platform.log.debug('Set Characteristic Intensity -> ', intensity);
   }
 
@@ -137,7 +137,7 @@ export class OSCR37HomebridgePlatformAccessory {
     const newState = firstValueFrom(this.fanStatus$);
     this.requestedFanUpdate$.next();
 
-    const {fanIntensity} = await newState;
+    const { fanIntensity } = await newState;
     this.platform.log.debug('Get Characteristic Intensity ->', fanIntensity);
 
     if (fanIntensity == null) {
@@ -167,7 +167,7 @@ export class OSCR37HomebridgePlatformAccessory {
     const newState = firstValueFrom(this.fanStatus$);
     this.requestedFanUpdate$.next();
 
-    const {isOscillating} = await newState;
+    const { isOscillating } = await newState;
     this.platform.log.debug('Get Characteristic Oscillation On ->', isOscillating);
 
     if (isOscillating == null) {
@@ -184,19 +184,19 @@ export class OSCR37HomebridgePlatformAccessory {
   private updateCharacteristics(fanStatus: FanStatus) {
     if (fanStatus.isOn != null) {
       this.service.updateCharacteristic(
-        this.platform.Characteristic.Active,
+        this.CharActive,
         fanStatus.isOn ?
           this.platform.Characteristic.Active.ACTIVE :
           this.platform.Characteristic.Active.INACTIVE);
     }
     if (fanStatus.fanIntensity != null) {
       this.service.updateCharacteristic(
-        this.platform.Characteristic.RotationSpeed,
+        OSCR37RotationSpeed,
         this.fanIntensityToPercentage(fanStatus.fanIntensity));
     }
     if (fanStatus.isOscillating != null) {
       this.service.updateCharacteristic(
-        this.platform.Characteristic.SwingMode,
+        this.CharSwingMode,
         fanStatus.isOscillating ?
           this.platform.Characteristic.SwingMode.SWING_ENABLED :
           this.platform.Characteristic.SwingMode.SWING_DISABLED);
