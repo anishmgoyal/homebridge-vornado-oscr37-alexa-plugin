@@ -2,7 +2,7 @@
   "private": false,
   "displayName": "Homebridge Vornado OSCR37 Alexa Plugin",
   "name": "@anishmgoyal/homebridge-vornado-oscr37-alexa-plugin",
-  "version": "1.0.5-beta.0",
+  "version": "1.0.5-beta.2",
   "description": "Controls an Alexa-bound Vornado OSCR37 Fan, using Amazon APIs. Currently in beta.",
   "license": "MIT",
   "repository": {
@@ -28,6 +28,7 @@
   ],
   "dependencies": {
     "alexa-remote2": "4.1.1",
+    "hap-nodejs": "0.10.0",
     "rxjs": "7.5.2"
   },
   "devDependencies": {
