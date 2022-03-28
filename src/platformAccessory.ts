@@ -1,6 +1,6 @@
 import { Categories, CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
-import { firstValueFrom, Observable, Subject } from 'rxjs';
-import { shareReplay, switchMap, throttleTime } from 'rxjs/operators';
+import { firstValueFrom, Observable, of, Subject } from 'rxjs';
+import { catchError, shareReplay, switchMap, throttleTime } from 'rxjs/operators';
 import { FanPowerToggleCommand, FanIntensityChangeCommand, FanOscillationToggleCommand, FanStatus } from './alexaApi';
 import { OSCR37FanService, OSCR37RotationSpeed } from './oscr37ServiceProvider';
 
@@ -28,7 +28,15 @@ export class OSCR37HomebridgePlatformAccessory {
   // requests come in at the same time
   private fanStatus$ = this.requestedFanUpdate$.pipe(
     throttleTime(20),
-    switchMap(() => this.platform.alexaClient.getDeviceStatus(this.queryId)),
+    switchMap(() =>
+      this.platform.alexaClient.getDeviceStatus(this.queryId).pipe(
+        catchError(err => {
+          this.platform.log.error(`Error getting status: ${err}`);
+          return of({
+            connected: false,
+          } as FanStatus);
+        }),
+      )),
     shareReplay({ bufferSize: 1, refCount: true }),
   );
 
@@ -38,30 +46,30 @@ export class OSCR37HomebridgePlatformAccessory {
     previous?: FanStatus,
     poll(): Promise<FanStatus | null>,
   } = {
-    fanStatus$: this.fanStatus$,
-    requestedFanUpdate$: this.requestedFanUpdate$,
-    async poll() {
-      // Create a subscriber for the fan status observable, to make sure that
-      // the transforms are actually applied; otherwise, nothing will happen
-      const newState = firstValueFrom(this.fanStatus$);
-      this.requestedFanUpdate$.next();
+      fanStatus$: this.fanStatus$,
+      requestedFanUpdate$: this.requestedFanUpdate$,
+      async poll() {
+        // Create a subscriber for the fan status observable, to make sure that
+        // the transforms are actually applied; otherwise, nothing will happen
+        const newState = firstValueFrom(this.fanStatus$);
+        this.requestedFanUpdate$.next();
 
-      const current = await newState;
-      let isChanged = false;
-      if (this.previous == null) {
-        isChanged = true;
-      } else {
-        isChanged = (current.isOn !== this.previous.isOn) ||
-                    (current.fanIntensity !== this.previous.fanIntensity) ||
-                    (current.isOscillating !== this.previous.isOscillating);
-      }
-      this.previous = current;
-      if (isChanged) {
-        return current;
-      }
-      return null;
-    },
-  };
+        const current = await newState;
+        let isChanged = false;
+        if (this.previous == null) {
+          isChanged = true;
+        } else {
+          isChanged = (current.isOn !== this.previous.isOn) ||
+            (current.fanIntensity !== this.previous.fanIntensity) ||
+            (current.isOscillating !== this.previous.isOscillating);
+        }
+        this.previous = current;
+        if (isChanged) {
+          return current;
+        }
+        return null;
+      },
+    };
 
   constructor(
     private readonly platform: OSCR37HomebridgePlatform,
@@ -95,14 +103,16 @@ export class OSCR37HomebridgePlatformAccessory {
       .onGet(this.getSwingMode.bind(this));
 
     if (this.platform.config.enablePolling) {
-      setInterval(async () => {
-        const state = await this.poller.poll();
-        // We get a state back if anything changed; otherwise, we get null
-        // back
-        if (state != null) {
-          this.updateCharacteristics(state);
-        }
-      }, this.platform.config.pollInterval * 1000 /* seconds to milliseconds */);
+      setInterval(
+        async () => {
+          const state = await this.poller.poll();
+          // We get a state back if anything changed; otherwise, we get null
+          // back
+          if (state != null) {
+            this.updateCharacteristics(state);
+          }
+        },
+        this.platform.config.pollInterval * 1000 /* seconds to milliseconds */);
     }
   }
 
